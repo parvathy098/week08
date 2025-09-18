@@ -1,4 +1,5 @@
 # week08/.github/workflows/frontend-cd.yml
+#add a command
 
 name: CD - Deploy Frontend to AKS
 
