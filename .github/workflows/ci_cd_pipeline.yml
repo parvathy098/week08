@@ -1,73 +1,73 @@
-name: CI/CD Pipeline - Test, Build, Deploy
+# name: CI/CD Pipeline - Test, Build, Deploy
 
-on:
-  push:
-    branches:
-      - main
-    # Only trigger CD if there are changes to application code
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'k8s/**'
-      - '.github/workflows/backend_ci.yml'
-      - '.github/workflows/frontend_ci.yml'
-      - '.github/workflows/backend-cd.yml'
-      - '.github/workflows/frontend-cd.yml'
-      - '.github/workflows/ci_cd_pipeline.yml'
+# on:
+#   push:
+#     branches:
+#       - main
+#     # Only trigger CD if there are changes to application code
+#     paths:
+#       - 'backend/**'
+#       - 'frontend/**'
+#       - 'k8s/**'
+#       - '.github/workflows/backend_ci.yml'
+#       - '.github/workflows/frontend_ci.yml'
+#       - '.github/workflows/backend-cd.yml'
+#       - '.github/workflows/frontend-cd.yml'
+#       - '.github/workflows/ci_cd_pipeline.yml'
 
-  workflow_dispatch:
-    inputs:
-      aks_cluster_name:
-        description: 'Name of the AKS Cluster to deploy to'
-        required: true
-        default: 'parvathy' # REPLACE with your default
-      aks_resource_group:
-        description: 'Resource Group of the AKS Cluster'
-        required: true
-        default: 'week8' # REPLACE with your default
-      aks_acr_name:
-        description: 'Name of ACR'
-        required: true
-        default: 'parvathy' # REPLACE with your default
+#   workflow_dispatch:
+#     inputs:
+#       aks_cluster_name:
+#         description: 'Name of the AKS Cluster to deploy to'
+#         required: true
+#         default: 'parvathy' # REPLACE with your default
+#       aks_resource_group:
+#         description: 'Resource Group of the AKS Cluster'
+#         required: true
+#         default: 'week8' # REPLACE with your default
+#       aks_acr_name:
+#         description: 'Name of ACR'
+#         required: true
+#         default: 'parvathy' # REPLACE with your default
 
-jobs:
-  # Job 1: Run CI for both backend and frontend. Note: This assumes you've made the CI workflows callable (Step 3A).
-  run_ci:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+# jobs:
+#   # Job 1: Run CI for both backend and frontend. Note: This assumes you've made the CI workflows callable (Step 3A).
+#   run_ci:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
 
-      # Run Backend CI as a reusable workflow (assumes you have a commit with the latest code to build)
-      - name: Run Backend CI
-        uses: ./.github/workflows/backend_ci.yml
-        # Note: Since the backend_ci.yml now has workflow_call, this will run it.
-        # This will only run build and push if the underlying logic is correct.
-        # For a truly linked pipeline, we would call the jobs directly, or rely on the push trigger.
-        # Since we changed backend_ci to only run on PR, we'll revert it back to push main
-        # OR use a more complex setup. For simplicity, we'll keep the backend/frontend CI push triggers
-        # and rely on them to push :latest on merge to main.
+#       # Run Backend CI as a reusable workflow (assumes you have a commit with the latest code to build)
+#       - name: Run Backend CI
+#         uses: ./.github/workflows/backend_ci.yml
+#         # Note: Since the backend_ci.yml now has workflow_call, this will run it.
+#         # This will only run build and push if the underlying logic is correct.
+#         # For a truly linked pipeline, we would call the jobs directly, or rely on the push trigger.
+#         # Since we changed backend_ci to only run on PR, we'll revert it back to push main
+#         # OR use a more complex setup. For simplicity, we'll keep the backend/frontend CI push triggers
+#         # and rely on them to push :latest on merge to main.
 
-  # Job 2: Deploy Backend
-  deploy_backend:
-    runs-on: ubuntu-latest
-    needs: run_ci # Deploy only if CI is successful (CI should have pushed images)
-    uses: ./.github/workflows/backend-cd.yml # Call the backend CD workflow as a reusable workflow
-    with:
-      aks_cluster_name: ${{ github.event.inputs.aks_cluster_name || 'parvathy' }} # Use input or default
-      aks_resource_group: ${{ github.event.inputs.aks_resource_group || 'week8' }} # Use input or default
-      aks_acr_name: ${{ github.event.inputs.aks_acr_name || 'parvathy' }} # Use input or default
-    secrets: inherit # Pass secrets to the called workflow
+#   # Job 2: Deploy Backend
+#   deploy_backend:
+#     runs-on: ubuntu-latest
+#     needs: run_ci # Deploy only if CI is successful (CI should have pushed images)
+#     uses: ./.github/workflows/backend-cd.yml # Call the backend CD workflow as a reusable workflow
+#     with:
+#       aks_cluster_name: ${{ github.event.inputs.aks_cluster_name || 'parvathy' }} # Use input or default
+#       aks_resource_group: ${{ github.event.inputs.aks_resource_group || 'week8' }} # Use input or default
+#       aks_acr_name: ${{ github.event.inputs.aks_acr_name || 'parvathy' }} # Use input or default
+#     secrets: inherit # Pass secrets to the called workflow
 
-  # Job 3: Deploy Frontend
-  deploy_frontend:
-    runs-on: ubuntu-latest
-    needs: deploy_backend # Deploy frontend only after backend is deployed and IPs are available
-    uses: ./.github/workflows/frontend-cd.yml # Call the frontend CD workflow as a reusable workflow
-    with:
-      aks_cluster_name: ${{ github.event.inputs.aks_cluster_name || 'parvathy' }}
-      aks_resource_group: ${{ github.event.inputs.aks_resource_group || 'week8' }}
-      # Pass the dynamic IPs from the output of the deploy_backend job
-      product_api_ip: http://${{ needs.deploy_backend.outputs.PRODUCT_API_IP }}:8000
-      order_api_ip: http://${{ needs.deploy_backend.outputs.ORDER_API_IP }}:8001
-    secrets: inherit # Pass secrets to the called workflow
+#   # Job 3: Deploy Frontend
+#   deploy_frontend:
+#     runs-on: ubuntu-latest
+#     needs: deploy_backend # Deploy frontend only after backend is deployed and IPs are available
+#     uses: ./.github/workflows/frontend-cd.yml # Call the frontend CD workflow as a reusable workflow
+#     with:
+#       aks_cluster_name: ${{ github.event.inputs.aks_cluster_name || 'parvathy' }}
+#       aks_resource_group: ${{ github.event.inputs.aks_resource_group || 'week8' }}
+#       # Pass the dynamic IPs from the output of the deploy_backend job
+#       product_api_ip: http://${{ needs.deploy_backend.outputs.PRODUCT_API_IP }}:8000
+#       order_api_ip: http://${{ needs.deploy_backend.outputs.ORDER_API_IP }}:8001
+#     secrets: inherit # Pass secrets to the called workflow

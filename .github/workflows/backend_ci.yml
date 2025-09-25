@@ -1,25 +1,10 @@
-# week08/.github/workflows/backend_ci.yml
+name: Backend CI/CD Pipeline
 
-
-name: Backend CI - Test, Build and Push Images to ACR
-
-# Trigger the workflow on pushes to the 'main' branch
-# You can also add 'pull_request:' to run on PRs
+# NEW TRIGGERS: Run CI on PR to main and push to dev. Run CD only on push to main.
 on:
-  # # Manual trigger
-  # workflow_dispatch:
-
-  # # Automatically on pushes to main branch
-  # pull_request:
-  #   branches:
-  #     - mainq
-
-  #   paths: # Only trigger if changes are in backend directories
-  #     - 'backend/**'
-  #     - '.github/workflows/backend_ci.yml' # Trigger if this workflow file changes
- # CI TRIGGERS: Test and Build
+  # CI TRIGGERS: Test and Build
   push:
-    branches: [ dev ] # Run CI when we push to the development branch
+    branches: [ development ] # Run CI when we push to the development branch
   pull_request:
     branches: [ main ]        # Also run CI when a PR is opened to main (a safety check)
 
@@ -27,29 +12,23 @@ on:
   push:
     branches: [ main ]        # Only deploy when code is pushed to the main branch (after a PR is merged)
 
-# Define global environment variables that can be used across jobs
-env:
-  # ACR Login Server (e.g., myregistry.azurecr.io)
-  # This needs to be set as a GitHub Repository Secret
-  ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
-  # Dynamically generate image tags based on Git SHA and GitHub Run ID
-  # This provides unique, traceable tags for each image build
-  IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
+  env:
+    ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
+    IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
 
 jobs:
   # Job 1: Run tests and linting for all backend services
   test_and_lint_backends:
-    runs-on: ubuntu-latest # Use a GitHub-hosted runner
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/development' || github.event_name == 'pull_request'
 
     services:
-      # Product DB container
       product_db:
         image: postgres:15
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: products
-        # Make pg_isready available so the service is healthy before tests run
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
@@ -58,7 +37,6 @@ jobs:
         ports:
           - 5432:5432
       
-      # Order DB
       order_db:
         image: postgres:15
         env:
@@ -74,29 +52,23 @@ jobs:
           --health-retries 5
 
     steps:
-      # 1. Checkout the repository code to the runner
       - name: Checkout repository
-        uses: actions/checkout@v4 # Action to check out your repository code
+        uses: actions/checkout@v4
 
-      # 2. Set up Python environment
       - name: Set up Python 3.10
-        uses: actions/setup-python@v5 # Action to set up Python environment
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      # 3. Install dependencies and run code quality checks
       - name: Install dependencies
-        run: | # Use a multi-line script to install pip dependencies
+        run: |
           pip install --upgrade pip
-          # Loop through each backend service folder
           for req in backend/*/requirements.txt; do
             echo "Installing $req"
             pip install -r "$req"
           done
-          # Install CI tools
           pip install pytest httpx
 
-      # 5. Run tests for product service
       - name: Run product_service tests
         working-directory: backend/product_service
         env:
@@ -108,7 +80,6 @@ jobs:
         run: |
           pytest tests --maxfail=1 --disable-warnings -q
       
-      # 6. Run tests for order service
       - name: Run order_service tests
         working-directory: backend/order_service
         env:
@@ -124,48 +95,124 @@ jobs:
   build_and_push_images:
     runs-on: ubuntu-latest
     needs: test_and_lint_backends
+    if: github.event_name == 'push' && github.ref == 'refs/heads/development' || github.event_name == 'pull_request'
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # Azure login using a Service Principal secret
     - name: Azure Login
       uses: azure/login@v1
       with:
-        creds: ${{ secrets.AZURE_CREDENTIALS }} # Needs to be set as a GitHub Secret (Service Principal JSON)
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    # Login to Azure Container Registry (ACR)
     - name: Login to Azure Container Registry
       run: az acr login --name ${{ env.ACR_LOGIN_SERVER }}
 
-    # Build and Push Docker image for Product Service
     - name: Build and Push Product Service Image
       run: |
-        docker build -t ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }} ./backend/product_service/
-        docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }}
+        docker build -t ${{ env.ACR_LOGIN_SERVER }}/product_service:latest ./backend/product_service/
+        docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:latest
 
-
-    # Build and Push Docker image for Order Service
     - name: Build and Push Order Service Image
       run: |
-        docker build -t ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }} ./backend/order_service/
-        docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
-
-        docker tag ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }} ${{ env.ACR_LOGIN_SERVER }}/order_service:latest
+        docker build -t ${{ env.ACR_LOGIN_SERVER }}/order_service:latest ./backend/order_service/
         docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:latest
 
-
-    # Logout from Azure for security (runs even if image push fails)
     - name: Logout from Azure
       run: az logout
       if: always()
 
-      # ADD THIS NEW JOB AFTER THE 'deploy_backend_to_aks' JOB
-  deploy_frontend_via_workflow:
+  # Job 3: Deploy Backend to AKS (only runs on push to main)
+  deploy_backend_to_aks:
+    name: Deploy Backend to AKS
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: Production
+    
+    outputs:
+      PRODUCT_API_IP: ${{ steps.get_product_ip.outputs.external_ip }}
+      ORDER_API_IP: ${{ steps.get_order_ip.outputs.external_ip }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          enable-AzPSSession: true
+
+      - name: Set Kubernetes context
+        run: |
+          az aks get-credentials --resource-group week8 --name parvathy --overwrite-existing
+
+      - name: Attach ACR
+        run: |
+          az aks update --name parvathy --resource-group week8 --attach-acr parvathy
+
+      - name: Deploy Backend Infrastructure
+        run: |
+          echo "Deploying backend infrastructure..."
+          cd k8s/
+          kubectl apply -f configmaps.yaml
+          kubectl apply -f secrets.yaml
+          kubectl apply -f product-db.yaml
+          kubectl apply -f order-db.yaml
+
+      - name: Deploy Backend Microservices
+        run: |
+          echo "Deploying backend microservices..."
+          cd k8s/
+          kubectl apply -f product-service.yaml
+          kubectl apply -f order-service.yaml
+      
+      - name: Wait for Backend LoadBalancer IPs
+        run: |
+          echo "Waiting for Product, Order LoadBalancer IPs to be assigned (up to 5 minutes)..."
+          PRODUCT_IP=""
+          ORDER_IP=""
+          
+          for i in $(seq 1 60); do
+            echo "Attempt $i/60 to get IPs..."
+            PRODUCT_IP=$(kubectl get service product-service-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            ORDER_IP=$(kubectl get service order-service-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
+            if [[ -n "$PRODUCT_IP" && -n "$ORDER_IP" ]]; then
+              echo "All backend LoadBalancer IPs assigned!"
+              echo "Product Service IP: $PRODUCT_IP"
+              echo "Order Service IP: $ORDER_IP"
+              break
+            fi
+            sleep 5
+          done
+          
+          if [[ -z "$PRODUCT_IP" || -z "$ORDER_IP" ]]; then
+            echo "Error: One or more LoadBalancer IPs not assigned after timeout."
+            exit 1
+          fi
+          
+          echo "PRODUCT_IP=$PRODUCT_IP" >> $GITHUB_ENV
+          echo "ORDER_IP=$ORDER_IP" >> $GITHUB_ENV
+
+      - name: Capture Product Service IP for Workflow Output
+        id: get_product_ip
+        run: echo "external_ip=${{ env.PRODUCT_IP }}" >> $GITHUB_OUTPUT
+      
+      - name: Capture Order Service IP for Workflow Output
+        id: get_order_ip
+        run: echo "external_ip=${{ env.ORDER_IP }}" >> $GITHUB_OUTPUT
+
+      - name: Logout from Azure
+        run: az logout
+
+  # Job 4: Trigger Frontend Deployment (only runs after successful backend deployment)
+  trigger_frontend_deployment:
     name: Trigger Frontend Deployment
     runs-on: ubuntu-latest
-    needs: deploy_backend_to_aks # This ensures it only runs if the backend deployed successfully
+    needs: deploy_backend_to_aks
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: Production
 
     steps:
@@ -175,6 +222,6 @@ jobs:
       - name: Trigger Frontend CD Workflow
         uses: benc-uk/workflow-dispatch@v1
         with:
-          workflow: frontend-cd.yml # Name of the frontend CD workflow file
+          workflow: frontend-cd.yml
           token: ${{ secrets.GITHUB_TOKEN }}
           inputs: '{"product_api_ip": "${{ needs.deploy_backend_to_aks.outputs.PRODUCT_API_IP }}", "order_api_ip": "${{ needs.deploy_backend_to_aks.outputs.ORDER_API_IP }}", "aks_cluster_name": "parvathy", "aks_resource_group": "week8"}'
