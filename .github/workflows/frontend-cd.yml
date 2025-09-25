@@ -6,6 +6,24 @@ name: CD - Deploy Frontend to AKS
 # This workflow can be called by other workflows and takes inputs.
 # Or it can be run manually if you provide the IPs.
 on:
+  on:
+  # PRIMARY TRIGGER: Called by the backend deployment workflow
+  workflow_call:
+    inputs:
+      product_api_ip:
+        required: true
+        type: string
+      order_api_ip:
+        required: true
+        type: string
+      aks_cluster_name:
+        required: true
+        type: string
+      aks_resource_group:
+        required: true
+        type: string
+
+        
   workflow_dispatch:
     inputs:
       product_api_ip:

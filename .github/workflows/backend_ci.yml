@@ -6,18 +6,26 @@ name: Backend CI - Test, Build and Push Images to ACR
 # Trigger the workflow on pushes to the 'main' branch
 # You can also add 'pull_request:' to run on PRs
 on:
-  # Manual trigger
-  workflow_dispatch:
+  # # Manual trigger
+  # workflow_dispatch:
 
-  # Automatically on pushes to main branch
+  # # Automatically on pushes to main branch
+  # pull_request:
+  #   branches:
+  #     - mainq
+
+  #   paths: # Only trigger if changes are in backend directories
+  #     - 'backend/**'
+  #     - '.github/workflows/backend_ci.yml' # Trigger if this workflow file changes
+ # CI TRIGGERS: Test and Build
+  push:
+    branches: [ dev ] # Run CI when we push to the development branch
   pull_request:
-    branches:
-      - mainq
+    branches: [ main ]        # Also run CI when a PR is opened to main (a safety check)
 
-    paths: # Only trigger if changes are in backend directories
-      - 'backend/**'
-      - '.github/workflows/backend_ci.yml' # Trigger if this workflow file changes
- 
+  # CD TRIGGER: Deploy
+  push:
+    branches: [ main ]        # Only deploy when code is pushed to the main branch (after a PR is merged)
 
 # Define global environment variables that can be used across jobs
 env:
@@ -152,3 +160,21 @@ jobs:
     - name: Logout from Azure
       run: az logout
       if: always()
+
+      # ADD THIS NEW JOB AFTER THE 'deploy_backend_to_aks' JOB
+  deploy_frontend_via_workflow:
+    name: Trigger Frontend Deployment
+    runs-on: ubuntu-latest
+    needs: deploy_backend_to_aks # This ensures it only runs if the backend deployed successfully
+    environment: Production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Trigger Frontend CD Workflow
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: frontend-cd.yml # Name of the frontend CD workflow file
+          token: ${{ secrets.GITHUB_TOKEN }}
+          inputs: '{"product_api_ip": "${{ needs.deploy_backend_to_aks.outputs.PRODUCT_API_IP }}", "order_api_ip": "${{ needs.deploy_backend_to_aks.outputs.ORDER_API_IP }}", "aks_cluster_name": "parvathy", "aks_resource_group": "week8"}'

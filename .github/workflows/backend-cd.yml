@@ -1,4 +1,7 @@
-name: CD - Deploy Backend Services to AKS
+deploy_backend_to_aks:
+  name: CD - Deploy Backend Services to AKS
+  runs-on: ubuntu-latest
+  environment: Production
 
 on:
   workflow_call:
