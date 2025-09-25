@@ -10,9 +10,16 @@ on:
   push:
     branches:
       - main
+      - dev
+
+
     paths: # Only trigger if changes are in the frontend directory
       - 'frontend/**'
       - '.github/workflows/frontend_ci.yml' # Trigger if this workflow file changes
+  pull_request:
+    branches:
+      - main
+      - dev
 
 # Define global environment variables that can be used across jobs
 env:
@@ -44,8 +51,9 @@ jobs:
     # Build and Push Docker image for Frontend
     - name: Build and Push Frontend Image
       run: |
-        docker build -t ${{ env.ACR_LOGIN_SERVER }}/frontend:latest ./frontend/
-        docker push ${{ env.ACR_LOGIN_SERVER }}/frontend:latest
+        docker build -t ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ env.IMAGE_TAG }} ./frontend
+        docker push ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ env.IMAGE_TAG }}
+
 
     # Logout from Azure for security (runs even if image push fails)
     - name: Logout from Azure

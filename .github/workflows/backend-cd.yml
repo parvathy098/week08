@@ -15,6 +15,9 @@ on:
         description: 'Name of ACR'
         required: true
         default: 'parvathy'
+  push:
+    branches:
+      - main
 
 jobs:
   deploy_backend:

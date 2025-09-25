@@ -24,6 +24,9 @@ on:
         description: 'Resource Group of the AKS Cluster'
         required: true
         default: 'week8'
+  push:
+    branches:
+      - main
 
   workflow_call:
     inputs:
